@@ -79,4 +79,4 @@ def data_statistics():
 
 if __name__ == "__main__":
     # data_statistics()
-    graph_show(True, 10, False)
+    graph_show(TIME_STAMP = True, annot_interval=10, use_map=False)
