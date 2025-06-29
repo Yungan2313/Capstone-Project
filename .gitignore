@@ -1,0 +1,6 @@
+#ignore
+Compressed_Data/
+Dataset/
+Dataset/compress.csv
+walk_traj/
+__pycache__/
