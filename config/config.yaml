@@ -1,0 +1,26 @@
+# --- Grid 編碼設定 ---
+cell_size: 0.0001            # 每個格子的經緯度大小（約 11 公尺）
+base_lat: 39.70              # 固定參考起點（緯度），用來轉換 lat → grid_y 由訓練資料計算出
+base_lon: 115.50             # 固定參考起點（經度），用來轉換 lon → grid_x
+
+# --- Grid 大小（需與實際統計值對應）--- 由訓練資料計算出
+num_cells_x: 11361           # 經度方向格子總數
+num_cells_y: 7164            # 緯度方向格子總數
+
+# --- 嵌入參數 ---
+embedding_dim: 64            # 每個 grid x/y 的 embedding 維度
+embedding_mode: concat       # sum 或 concat
+
+# --- Dropout 與正規化 ---
+dropout: 0.1
+use_layernorm: true
+
+# --- 訓練相關參數（你可視需求新增）---
+batch_size: 32
+seq_len: 2000
+lr: 0.0001
+epochs: 20
+
+# --- 檔案與路徑設定（可擴充）---
+dataset_dir: datasets/
+skip_file_list: datasets/notBeijing.txt
