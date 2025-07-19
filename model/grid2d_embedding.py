@@ -50,8 +50,8 @@ class Grid2DEmbedding(nn.Module):
         elif self.mode == "concat":
             emb = torch.cat([x_emb, y_emb], dim=-1)  # [B, L, 2D]
 
-        # if self.use_layernorm:
-        #     emb = self.norm(emb)
+        if self.use_layernorm:
+            emb = self.norm(emb)
 
         # emb = self.dropout(emb)
         return emb
