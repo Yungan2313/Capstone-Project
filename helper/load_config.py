@@ -14,15 +14,14 @@ def load_config(path="config/config.yaml"):
     if not os.path.exists(path):
         raise FileNotFoundError(f"no such file or directory: '{path}'")
 
-    with open(path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    with open("config/config.yaml", "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
         
-    return config
+    return cfg
 
 if __name__ == "__main__":
-    config = load_config()
+    cfg = load_config()
 
     # 取得參數
-    cell_size = config["cell_size"]
-    base_lat = config["base_lat"]
-    embedding_dim = config["embedding_dim"]
+    num_x = cfg["data"]["num_cells_x"]  # 或 cfg["data"]["num_cells_x"]
+    dim = cfg["model"]["embedding"]["dim"]
