@@ -3,11 +3,11 @@
 # ----------------------------------------
 data:
   # grid definite
-  cell_size   : 0.0001      # about 11m
+  cell_size   : 0.001      # about 11m
   min_lat     : 39.847733
   min_lon     : 115.6791
-  num_cells_x : 11361       # lon grid count
-  num_cells_y : 7164        # lat grid count
+  num_cells_x : 11952      # lon grid count
+  num_cells_y : 3002        # lat grid count
 
   # 檔案路徑
   dataset_dir : data/datasets   # csv files directory
@@ -26,19 +26,20 @@ model:
   compressor:               # ⇐ Transformer Encoder
     layers     : 4
     heads      : 8
-    ffn_dim    : 512
+    ffn_dim    : 256
     dropout    : 0.1
 
   constructor:              # ⇐ Transformer Decoder
     layers     : 4
     heads      : 8
-    ffn_dim    : 512
+    ffn_dim    : 256
     dropout    : 0.1
 
   bottleneck:
     compression_ratio: 0.3  # 0.3 = 30% of input sequence length
   loss: mse                 # mse | l1
   max_seq_len: 2048
+  local_window: 3          # (= w) 2w+1 的方形 window
 
 # ----------------------------------------
 # 3.Training

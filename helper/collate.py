@@ -1,17 +1,23 @@
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
-def collate_fn(batch):
+def collate_fn(batch, pad_val=-1):
     """
-    batch: List[Tuple[gx, gy, length]]
-    回傳：
-      gx_pad, gy_pad   -> [B, L_max]
-      pad_mask         -> [B, L_max]  True 表示「是 PAD」給 Transformer 用
+    batch: List[Tuple[gx, gy]] where gx,gy = 1-D LongTensor
     """
-    gx_list, gy_list, lens = zip(*batch)
-    gx_pad = pad_sequence(gx_list, batch_first=True, padding_value=0)
-    gy_pad = pad_sequence(gy_list, batch_first=True, padding_value=0)
-    # True = pad，False = valid
-    lens = torch.tensor(lens)
-    pad_mask = (torch.arange(gx_pad.size(1))[None, :].to(lens.device) >= lens[:, None])
-    return gx_pad, gy_pad, pad_mask
+    gxs, gys, _ = zip(*batch)
+    lens = [len(x) for x in gxs]
+    max_len = max(lens)
+
+    padded_gx = torch.full((len(batch), max_len), pad_val, dtype=torch.long)
+    padded_gy = torch.full((len(batch), max_len), pad_val, dtype=torch.long)
+    pad_mask   = torch.ones (len(batch), max_len,  dtype=torch.bool)   # True=PAD
+
+    for i, (gx, gy) in enumerate(zip(gxs, gys)):
+        L = len(gx)
+        padded_gx[i, :L] = gx
+        padded_gy[i, :L] = gy
+        pad_mask[i, :L]  = False       # False=有效 token
+
+    return padded_gx, padded_gy, pad_mask
+

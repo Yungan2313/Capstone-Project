@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from model.grid2d_embedding import Grid2DEmbedding
+from helper.grid_utils import local_window
 
 # -----------------------------------------------------------------------------
 # Utility
@@ -76,11 +77,17 @@ class Constructor(nn.Module):
         self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=cfg["model"]["constructor"]["layers"])
         self.output_proj_x = nn.Linear(model_cfg["embedding"]["dim"], cfg["data"]["num_cells_x"])
         self.output_proj_y = nn.Linear(model_cfg["embedding"]["dim"], cfg["data"]["num_cells_y"])
+        self.out_emb = nn.Embedding(cfg["data"]["num_cells_x"] *
+                                    cfg["data"]["num_cells_y"],
+                                    cfg["model"]["embedding"]["dim"])
+        self.cfg = cfg
 
     def forward(
         self,
         tgt_emb: torch.Tensor,
         memory: torch.Tensor,
+        grid_x: torch.Tensor,
+        grid_y: torch.Tensor,
         tgt_mask: Optional[torch.Tensor] = None,
         memory_key_padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -88,9 +95,15 @@ class Constructor(nn.Module):
         h = self.decoder(
             tgt_emb, memory, tgt_mask=tgt_mask, memory_key_padding_mask=memory_key_padding_mask
         )
-        logits_x = self.output_proj_x(h)
-        logits_y = self.output_proj_y(h)
-        return logits_x, logits_y
+        # logits_x = self.output_proj_x(h)
+        # logits_y = self.output_proj_y(h)
+        # return logits_x, logits_y
+    
+        local_ids, tgt_pos = local_window(
+            grid_x, grid_y, win=cfg["model"]["local_window"])  # 自己設定 win
+        local_emb = self.out_emb(local_ids)                    # [B,L,K,D]
+        logits = (h.unsqueeze(-2) * local_emb).sum(-1)         # [B,L,K]
+        return logits, tgt_pos
 
 # -----------------------------------------------------------------------------
 # Full model
@@ -114,14 +127,24 @@ class TrajSimplificationModel(nn.Module):
 
     # ------------------------------------------------------------------ utils
     def _sample_mask(self, scores: torch.Tensor, keep_ratio: float, pad_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Turn importance logits into a binary mask (True=keep)."""
-        if pad_mask is not None:                      # [B, L]  True=PAD
-            scores = scores.masked_fill(pad_mask, -1e9)
-        B, L = scores.shape
-        k = max(1, int(L * keep_ratio))
-        topk = torch.topk(scores, k=k, dim=1).indices  # [B, k]
+        """Turn importance logits into a binary mask (True=keep).
+        scores   : [B, L]
+        pad_mask : [B, L]  True 表 PAD
+        """
+        # ① 給 PAD −∞，永遠不被選
+        valid_scores = scores.masked_fill(pad_mask, -1e9)
+
+        # ② 每個 batch 用「實際有效點數」算 k
+        lengths = (~pad_mask).sum(dim=1)                  # [B]
+        k = (lengths.float() * keep_ratio).clamp(min=1).long()
+
+        topk_idx = torch.stack([
+            valid_scores[b].topk(k=bk.item()).indices if bk.item() > 0 else torch.tensor([], dtype=torch.long, device=scores.device)
+            for b, bk in enumerate(k)
+        ]) #若 bk.item() == 0 會報錯，因此應加保護
+
         mask = torch.zeros_like(scores, dtype=torch.bool)
-        mask.scatter_(1, topk, True)
+        mask.scatter_(1, topk_idx, True)
         return mask
 
     # ------------------------------------------------------------------ forward
@@ -140,7 +163,7 @@ class TrajSimplificationModel(nn.Module):
 
         # 2) compressor – importance scores
         scores = self.compressor(emb,src_key_padding_mask = pad_mask)  # [B, L]
-        mask = self._sample_mask(scores, self.cfg["model"]["bottleneck"]["compression_ratio"])  # [B, L]
+        mask = self._sample_mask(scores, self.cfg["model"]["bottleneck"]["compression_ratio"],pad_mask)  # [B, L]
 
         # 3) gather retained embeddings as memory for decoder
         # We keep original ordering
@@ -160,7 +183,7 @@ class TrajSimplificationModel(nn.Module):
         tgt_emb = F.pad(emb[:, :-1], (0, 0, 1, 0))  # prepend zero vector (start token)
         tgt_mask = subsequent_mask(L).to(emb.device)
         logits_x, logits_y = self.constructor(
-            tgt_emb, memory_padded, tgt_mask=tgt_mask, memory_key_padding_mask=mem_pad_mask
+            tgt_emb, memory_padded, grid_x, grid_y, tgt_mask=tgt_mask, memory_key_padding_mask=mem_pad_mask
         )  # each [B, L, num_cells]
 
         # 5) loss (teacher forcing)

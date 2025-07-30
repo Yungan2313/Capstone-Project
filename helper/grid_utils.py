@@ -1,4 +1,4 @@
-# model/grid_utils.py
+import torch
 import numpy as np
 import yaml
 from pathlib import Path
@@ -22,3 +22,28 @@ def grid_to_latlon(gx_arr, gy_arr):
     lat = gy_arr * CELL_SIZE + MIN_LAT + CELL_SIZE / 2    # 中心點
     lon = gx_arr * CELL_SIZE + MIN_LON + CELL_SIZE / 2
     return lat, lon
+
+def local_window(grid_x, grid_y, win=3):
+    """
+    給定每個時間步的中心格子 (gx, gy)，回傳：
+      local_ids   : [B, L, (2w+1)^2]  局部格子 id (flatten 到單一 id)
+      tgt_pos_in_window : [B, L]       真實格子在 window 中的 offset
+    """
+    B, L = grid_x.shape
+    device = grid_x.device
+    rng = torch.arange(-win, win+1, device=device)
+    dx, dy = torch.meshgrid(rng, rng, indexing="ij")          # (2w+1, 2w+1)
+    dx, dy = dx.flatten(), dy.flatten()                       # K = (2w+1)^2
+
+    local_x = grid_x[..., None] + dx        # [B, L, K]
+    local_y = grid_y[..., None] + dy        # [B, L, K]
+
+    # clamp 到合法範圍
+    local_x = local_x.clamp(0, _cfg['data']['num_cells_x']-1)
+    local_y = local_y.clamp(0, _cfg['data']['num_cells_y']-1)
+
+    local_ids = local_y * _cfg['data']['num_cells_x'] + local_x      # flatten → id
+    tgt_pos   = ((win) * (2*win+1) + win)                     # 中央位置
+    tgt_pos   = torch.full((B, L), tgt_pos, device=device, dtype=torch.long)
+
+    return local_ids, tgt_pos

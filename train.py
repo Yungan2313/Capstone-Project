@@ -1,7 +1,3 @@
-# train.py
-# -----------------------------------------------------------------------------
-#  Trajectory-Simplification  ─ training script
-# -----------------------------------------------------------------------------
 import os, copy, time
 from dataclasses import asdict
 from pathlib import Path
@@ -25,18 +21,21 @@ from helper.graph import draw_loss
 # -----------------------------------------------------------------------------
 #  ★ 1. training loop  ★
 # -----------------------------------------------------------------------------
-def sequence_ce_loss(logits, target, ignore_index=None):
+def masked_ce(logits, target, pad_mask):
     """
-    logits : [B, L, C]
+    logits : [B, L, C]   (未轉置才符合 cross_entropy)
     target : [B, L]
-    先展平成 [B*L, C] / [B*L] 再算 CE
+    pad_mask : [B, L]    True = PAD
     """
     B, L, C = logits.shape
-    return F.cross_entropy(
-        logits.view(B * L, C),          # [N, C]
-        target.view(B * L),             # [N]
-        ignore_index=ignore_index       # <- PAD token 時很好用
-    )
+    loss = F.cross_entropy(
+        logits.view(B * L, C),          # [B*L, C]
+        target.view(B * L),             # [B*L]
+        reduction="none"
+    )                                   # => [B*L]
+    loss = loss.view(B, L)
+    loss = loss.masked_fill(pad_mask, 0.)
+    return loss.sum() / (~pad_mask).sum()   # 只對有效 token 取平均
     
 def train_one_epoch(model, loader, optimizer, device):
     model.train()
@@ -44,9 +43,8 @@ def train_one_epoch(model, loader, optimizer, device):
     for gx, gy, pad_mask in tqdm(loader, desc="train", leave=True):
         gx, gy, pad_mask = gx.to(device), gy.to(device), pad_mask.to(device)
         out: Dict[str, torch.Tensor] = model(gx, gy, pad_mask)  # <-- forward
-        # loss = F.cross_entropy(out["logits_x"], gx) + F.cross_entropy(out["logits_y"], gy)
-        loss_x = sequence_ce_loss(out["logits_x"], gx, ignore_index=0)
-        loss_y = sequence_ce_loss(out["logits_y"], gy, ignore_index=0)
+        loss_x = masked_ce(out["logits_x"], gx, pad_mask)
+        loss_y = masked_ce(out["logits_y"], gy, pad_mask)
         loss   = loss_x + loss_y               # or average
         optimizer.zero_grad()
         loss.backward()
@@ -62,7 +60,9 @@ def evaluate(model, loader, device):
     for gx, gy, pad_mask in tqdm(loader, desc="valid", leave=False):
         gx, gy, pad_mask = gx.to(device), gy.to(device), pad_mask.to(device)
         out: Dict[str, torch.Tensor] = model(gx, gy, pad_mask)
-        loss = F.cross_entropy(out["logits_x"], gx) + F.cross_entropy(out["logits_y"], gy)
+        loss_x = masked_ce(out["logits_x"], gx, pad_mask)
+        loss_y = masked_ce(out["logits_y"], gy, pad_mask)
+        loss   = loss_x + loss_y
         total_loss += loss.item() * gx.size(0)
     return total_loss / len(loader.dataset)
 
@@ -71,6 +71,7 @@ def evaluate(model, loader, device):
 #  ★ 2. main  ★
 # -----------------------------------------------------------------------------
 def main():
+    print("Starting training...")
     # ----------------------- paths & config -----------------------
     cfg = load_config("config/config.yaml")  # 讀取 config.yaml
     # data_cfg  = DataConfig.from_yaml(cfg["data"])
@@ -82,6 +83,7 @@ def main():
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # ----------------------- data -----------------------
+    print("Preparing data...")
     data_args = cfg["data"]
     dm = TrajDataModule(
         data_dir        = cfg["data"]["dataset_dir"],
@@ -92,11 +94,12 @@ def main():
         num_workers     = train_cfg["num_workers"],
     )
     loaders = dm.loaders()
+    print(f"Train: {len(loaders['train'].dataset)} samples")
+    print(f"Val:   {len(loaders['val'].dataset)} samples")
     # ----------------------- model -----------------------
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model  = TrajSimplificationModel(cfg).to(device)
     # print(model)  # 可先看看參數量
-
     # ----------------------- optim -----------------------
     decay, no_decay = [], []
     for n, p in model.named_parameters():
