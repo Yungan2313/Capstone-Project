@@ -12,7 +12,7 @@ def graph_show(TIME_STAMP=False, annot_interval=1, use_map=True):
     # TIME_STAMP: whether to annotate timestamps
     # annot_interval: annotate every N points
     # use_map: whether to show background map
-    DIR = os.path.join(os.getcwd(), 'datasets/test')
+    DIR = os.path.join(os.getcwd(), 'data/test')
     df = pd.read_csv(os.path.join(DIR, 'test.csv'))
 
     # Create GeoDataFrame and project

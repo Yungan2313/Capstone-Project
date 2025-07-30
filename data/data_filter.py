@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 
-DATASET_DIR = "datasets/"  
+DATASET_DIR = "data/datasets/"  
 OUTPUT_FILE = "range_report.txt"
 
 # 北京範圍
