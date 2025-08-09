@@ -3,11 +3,13 @@
 # ----------------------------------------
 data:
   # grid definite
-  cell_size   : 0.001      # about 11m
-  min_lat     : 39.847733
+  cell_size   : 0.001      # about 
+  min_lat     : 39.847733   # save for calculating w (calulate from grid_stats.py)
   min_lon     : 115.6791
-  num_cells_x : 11952      # lon grid count
-  num_cells_y : 3002        # lat grid count
+  fixed_window: 18         # w (calulate from scan_w.py)
+  num_cells_x : 37         # lon grid count = pad_idx + 1
+  num_cells_y : 37         # lat grid count = pad_idx + 1
+  pad_idx     : 36         # 2*w+1
 
   # 檔案路徑
   dataset_dir : data/datasets   # csv files directory
@@ -39,7 +41,7 @@ model:
     compression_ratio: 0.3  # 0.3 = 30% of input sequence length
   loss: mse                 # mse | l1
   max_seq_len: 2048
-  local_window: 3          # (= w) 2w+1 的方形 window
+  local_window: 18          # constructor used (w)
 
 # ----------------------------------------
 # 3.Training

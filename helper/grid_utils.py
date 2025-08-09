@@ -9,12 +9,18 @@ _cfg = load_config()
 CELL_SIZE = _cfg["data"]["cell_size"]          # 0.0001 之類
 MIN_LAT   = _cfg["data"]["min_lat"]
 MIN_LON   = _cfg["data"]["min_lon"]
+WIN       = _cfg["data"]["fixed_window"]
 
 
-def latlon_to_grid(lat_arr, lon_arr):
-    """np.ndarray → np.ndarray (gx, gy)"""
-    gx = np.floor((lon_arr - MIN_LON) / CELL_SIZE).astype(int)
-    gy = np.floor((lat_arr - MIN_LAT) / CELL_SIZE).astype(int)
+def latlon_to_grid(lat_arr, lon_arr, win: int = WIN):
+    # 1) 絕對格子（仍用 cell_size 量化）
+    gx_abs = np.floor((lon_arr - lon_arr[0]) / CELL_SIZE).astype(int)
+    gy_abs = np.floor((lat_arr - lat_arr[0]) / CELL_SIZE).astype(int)
+    # 2) shift + clip 到 0‥2w
+    gx = np.clip(gx_abs + win, 0, 2*win)
+    gy = np.clip(gy_abs + win, 0, 2*win)
+    if (gx_abs > win).any() or (gy_abs > win).any():
+        print("⚠️ clip", gx_abs.max(), gy_abs.max()) # for debug
     return gx, gy
 
 

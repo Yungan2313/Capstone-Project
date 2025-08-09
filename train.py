@@ -129,11 +129,11 @@ def main():
 
         # --- checkpoint ---
         torch.save({"model": model.state_dict(),
-                    "cfg": asdict(cfg)}, run_dir / "last.pt")
+                        "cfg": cfg}, run_dir / "last.pth")
         if val_loss < best_val:
             best_val = val_loss
             torch.save({"model": model.state_dict(),
-                        "cfg": asdict(cfg)}, run_dir / "best.pt")
+                        "cfg": cfg}, run_dir / "best.pth")
             no_imp = 0
         else:
             no_imp += 1

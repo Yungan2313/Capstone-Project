@@ -1,10 +1,13 @@
 import torch
 from torch.nn.utils.rnn import pad_sequence
+from helper.load_config import load_config
 
 def collate_fn(batch, pad_val=-1):
     """
     batch: List[Tuple[gx, gy]] where gx,gy = 1-D LongTensor
     """
+    PAD = load_config("config/config.yaml")["data"]["pad_idx"]
+    pad_val = PAD
     gxs, gys, _ = zip(*batch)
     lens = [len(x) for x in gxs]
     max_len = max(lens)

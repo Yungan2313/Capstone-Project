@@ -95,12 +95,12 @@ class Constructor(nn.Module):
         h = self.decoder(
             tgt_emb, memory, tgt_mask=tgt_mask, memory_key_padding_mask=memory_key_padding_mask
         )
-        # logits_x = self.output_proj_x(h)
-        # logits_y = self.output_proj_y(h)
-        # return logits_x, logits_y
+        logits_x = self.output_proj_x(h)
+        logits_y = self.output_proj_y(h)
+        return logits_x, logits_y
     
         local_ids, tgt_pos = local_window(
-            grid_x, grid_y, win=cfg["model"]["local_window"])  # 自己設定 win
+            grid_x, grid_y, win=self.cfg["model"]["local_window"])  # 自己設定 win
         local_emb = self.out_emb(local_ids)                    # [B,L,K,D]
         logits = (h.unsqueeze(-2) * local_emb).sum(-1)         # [B,L,K]
         return logits, tgt_pos
@@ -131,20 +131,18 @@ class TrajSimplificationModel(nn.Module):
         scores   : [B, L]
         pad_mask : [B, L]  True 表 PAD
         """
-        # ① 給 PAD −∞，永遠不被選
-        valid_scores = scores.masked_fill(pad_mask, -1e9)
-
-        # ② 每個 batch 用「實際有效點數」算 k
-        lengths = (~pad_mask).sum(dim=1)                  # [B]
+        valid = scores.masked_fill(pad_mask, -1e9)
+        lengths = (~pad_mask).sum(dim=1)                 # [B]
         k = (lengths.float() * keep_ratio).clamp(min=1).long()
 
-        topk_idx = torch.stack([
-            valid_scores[b].topk(k=bk.item()).indices if bk.item() > 0 else torch.tensor([], dtype=torch.long, device=scores.device)
-            for b, bk in enumerate(k)
-        ]) #若 bk.item() == 0 會報錯，因此應加保護
-
         mask = torch.zeros_like(scores, dtype=torch.bool)
-        mask.scatter_(1, topk_idx, True)
+
+        # 逐條處理，避免 stack 尺寸不一
+        for b, bk in enumerate(k):
+            if bk.item() == 0:
+                continue
+            topk_idx = valid[b].topk(k=bk.item()).indices   # 長度 = bk
+            mask[b, topk_idx] = True
         return mask
 
     # ------------------------------------------------------------------ forward
@@ -168,13 +166,11 @@ class TrajSimplificationModel(nn.Module):
         # 3) gather retained embeddings as memory for decoder
         # We keep original ordering
         B, L, D = emb.size()
-        memory = torch.stack([
-            emb[b][mask[b]] for b in range(B) #從emb裡的資料跑過每一個batch找出 mask = True 對應的數值
-        ])  # List[Li,D] -> ragged; we pad to max retained length
-        max_kept = max(m.size(0) for m in memory)
+        retained = [emb[b][mask[b]] for b in range(B)]
+        max_kept = max(m.size(0) for m in retained)
         memory_padded = torch.zeros(B, max_kept, D, device=emb.device) #[B, L_max, D]
         mem_pad_mask = torch.ones(B, max_kept, dtype=torch.bool, device=emb.device)
-        for b, m in enumerate(memory):
+        for b, m in enumerate(retained):
             memory_padded[b, : m.size(0)] = m
             mem_pad_mask[b, : m.size(0)] = False  # False means valid token for Transformer
 

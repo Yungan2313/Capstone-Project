@@ -8,14 +8,16 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from helper.grid_utils import latlon_to_grid
 from helper.collate import collate_fn
+from helper.load_config import load_config
 
 class TrajCSVDataset(Dataset):
     """
     假設每檔案一條軌跡 csv 檔將單一 csv → (gx, gy, length) tensor
     """
-    def __init__(self, files: List[Path], max_len: int):
+    def __init__(self, files: List[Path], max_len: int, win):
         self.files = files
         self.max_len = max_len
+        self.win = win
 
     def __len__(self): return len(self.files)
 
@@ -24,6 +26,7 @@ class TrajCSVDataset(Dataset):
         gx, gy = latlon_to_grid(
             df["lat"].values,
             df["lon"].values,
+            win=self.win
         )
         if len(gx) > self.max_len:        # truncate，但 **不 pad**
             gx, gy = gx[: self.max_len], gy[: self.max_len]
@@ -60,14 +63,16 @@ class TrajDataModule:
 
     # ------------------------------------------------------------------
     def _prepare(self):
+        cfg = load_config("config/config.yaml")
+        w = cfg["data"]["fixed_window"]
         files = [f for f in self.data_dir.glob("*.csv") if f.name not in self.skip]
         random.shuffle(files)
         n = len(files)
         n_train = int(n * self.ratio[0])
         n_val   = int(n * self.ratio[1])
-        self.train_ds = TrajCSVDataset(files[:n_train], self.max_len)
-        self.val_ds   = TrajCSVDataset(files[n_train : n_train + n_val], self.max_len)
-        self.test_ds  = TrajCSVDataset(files[n_train + n_val :], self.max_len)
+        self.train_ds = TrajCSVDataset(files[:n_train], self.max_len, w)
+        self.val_ds   = TrajCSVDataset(files[n_train : n_train + n_val], self.max_len, w)
+        self.test_ds  = TrajCSVDataset(files[n_train + n_val :], self.max_len, w)
 
     # ------------------------------------------------------------------
     def loaders(self) -> Dict[str, DataLoader]:
