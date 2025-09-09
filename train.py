@@ -21,6 +21,37 @@ from helper.graph import draw_loss
 # -----------------------------------------------------------------------------
 #  ★ 1. training loop  ★
 # -----------------------------------------------------------------------------
+def _make_axis_centers(n: int, device):
+    # 以格子中心為座標：0.5, 1.5, 2.5, ... (單位：格子)
+    return (torch.arange(n, device=device, dtype=torch.float32) + 0.5)
+
+def sed_from_two_logits(
+    logits_x, logits_y,            # [B,L,Cx], [B,L,Cy]
+    gx, gy,                         # [B,L],    [B,L]  (int)
+    pad_mask,                       # [B,L] True=PAD
+    x_centers, y_centers,           # [Cx], [Cy] (float)
+    tau: float = 1.0,
+    eps: float = 1e-6
+):
+    # soft-argmax → 連續座標
+    px = F.softmax(logits_x / tau, dim=-1)          # [B,L,Cx]
+    py = F.softmax(logits_y / tau, dim=-1)          # [B,L,Cy]
+    pred_x = torch.matmul(px, x_centers)            # [B,L]
+    pred_y = torch.matmul(py, y_centers)            # [B,L]
+
+    # GT 連續座標（用中心）
+    gt_x = x_centers[gx]                            # [B,L]
+    gt_y = y_centers[gy]                            # [B,L]
+
+    diff2 = (pred_x - gt_x) ** 2 + (pred_y - gt_y) ** 2
+    sed   = torch.sqrt(diff2 + eps * eps)           # [B,L]
+    if pad_mask is not None:
+        sed = sed.masked_fill(pad_mask, 0.0)
+        denom = (~pad_mask).sum().clamp_min(1)
+    else:
+        denom = torch.tensor(sed.numel(), device=sed.device)
+    return sed.sum() / denom
+
 def masked_ce(logits, target, pad_mask):
     """
     logits : [B, L, C]   (未轉置才符合 cross_entropy)
@@ -37,34 +68,49 @@ def masked_ce(logits, target, pad_mask):
     loss = loss.masked_fill(pad_mask, 0.)
     return loss.sum() / (~pad_mask).sum()   # 只對有效 token 取平均
     
-def train_one_epoch(model, loader, optimizer, device):
+def train_one_epoch(model, loader, optimizer, device, cfg):
     model.train()
     total_loss = 0.0
     for gx, gy, pad_mask in tqdm(loader, desc="train", leave=True):
         gx, gy, pad_mask = gx.to(device), gy.to(device), pad_mask.to(device)
         out: Dict[str, torch.Tensor] = model(gx, gy, pad_mask)  # <-- forward
-        loss_x = masked_ce(out["logits_x"], gx, pad_mask)
-        loss_y = masked_ce(out["logits_y"], gy, pad_mask)
-        loss   = loss_x + loss_y               # or average
+        Cx = out["logits_x"].size(-1)
+        Cy = out["logits_y"].size(-1)
+        x_centers = _make_axis_centers(Cx, device=out["logits_x"].device)
+        y_centers = _make_axis_centers(Cy, device=out["logits_y"].device)
+        loss = sed_from_two_logits(
+            out["logits_x"], out["logits_y"],
+            gx, gy, pad_mask,
+            x_centers, y_centers,
+            tau=(cfg["training"].get("softargmax_tau", 1.0) if isinstance(cfg, dict) and "training" in cfg else 1.0),
+            eps=1e-6
+        )
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * gx.size(0)
     return total_loss / len(loader.dataset)
 
-
 @torch.no_grad()
-def evaluate(model, loader, device):
+def evaluate(model, loader, device, cfg):
     model.eval()
     total_loss = 0.0
     for gx, gy, pad_mask in tqdm(loader, desc="valid", leave=False):
         gx, gy, pad_mask = gx.to(device), gy.to(device), pad_mask.to(device)
-        out: Dict[str, torch.Tensor] = model(gx, gy, pad_mask)
-        loss_x = masked_ce(out["logits_x"], gx, pad_mask)
-        loss_y = masked_ce(out["logits_y"], gy, pad_mask)
-        loss   = loss_x + loss_y
+        out: Dict[str, torch.Tensor] = model(gx, gy, pad_mask)  # <-- forward
+        Cx = out["logits_x"].size(-1)
+        Cy = out["logits_y"].size(-1)
+        x_centers = _make_axis_centers(Cx, device=out["logits_x"].device)
+        y_centers = _make_axis_centers(Cy, device=out["logits_y"].device)
+        loss = sed_from_two_logits(
+            out["logits_x"], out["logits_y"],
+            gx, gy, pad_mask,
+            x_centers, y_centers,
+            tau=getattr(cfg["training"], "softargmax_tau", 1.0) if isinstance(cfg, dict) and "training" in cfg else 1.0,
+            eps=1e-6
+        ) 
         total_loss += loss.item() * gx.size(0)
-    return total_loss / len(loader.dataset)
+    return total_loss / len(loader.dataset) 
 
 
 # -----------------------------------------------------------------------------
@@ -81,7 +127,9 @@ def main():
     res_dir.mkdir(parents=True, exist_ok=True)
     run_dir = Path("checkpoint") / time.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
-
+    best_path = run_dir / "best.pt"                            # <<< ADD
+    last_path = run_dir / "last.pt"                            # <<< ADD
+    best_val = float("inf")                                    # <<< ADD
     # ----------------------- data -----------------------
     print("Preparing data...")
     data_args = cfg["data"]
@@ -120,8 +168,8 @@ def main():
     val_losses = []
     for epoch in range(1, num_epochs + 1):
         print(f"\nEpoch {epoch}")
-        train_loss = train_one_epoch(model, loaders["train"], optimizer, device)
-        val_loss = evaluate(model, loaders["val"], device)
+        train_loss = train_one_epoch(model, loaders["train"], optimizer, device, cfg)
+        val_loss = evaluate(model, loaders["val"], device, cfg)
         scheduler.step(val_loss)
         train_losses.append(train_loss)
         val_losses.append(val_loss)
@@ -129,11 +177,11 @@ def main():
 
         # --- checkpoint ---
         torch.save({"model": model.state_dict(),
-                        "cfg": cfg}, run_dir / "last.pth")
+                        "cfg": cfg}, last_path)
         if val_loss < best_val:
             best_val = val_loss
             torch.save({"model": model.state_dict(),
-                        "cfg": cfg}, run_dir / "best.pth")
+                        "cfg": cfg}, best_path)
             no_imp = 0
         else:
             no_imp += 1
