@@ -19,8 +19,8 @@ def latlon_to_grid(lat_arr, lon_arr, win: int = WIN):
     # 2) shift + clip 到 0‥2w
     gx = np.clip(gx_abs + win, 0, 2*win)
     gy = np.clip(gy_abs + win, 0, 2*win)
-    if (gx_abs > win).any() or (gy_abs > win).any():
-        print("⚠️ clip", gx_abs.max(), gy_abs.max()) # for debug
+    # if (gx_abs > win).any() or (gy_abs > win).any():
+    #     print("⚠️ clip", gx_abs.max(), gy_abs.max()) # for debug
     return gx, gy
 
 
