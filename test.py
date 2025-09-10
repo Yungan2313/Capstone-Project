@@ -17,16 +17,19 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # parser.add_argument("--max_iter", type=int, default=30, help="fine-tune rounds")
 # parser.add_argument("--patience", type=int, default=5, help="stop if mask unchanged for N rounds")
 # args = parser.parse_args()
-ckpt_path = "./checkpoint/20250815-184727/best.pt"         # ← 換成你的 .pt 路徑
+ckpt_path = "./checkpoint/20250910-184624_v2withsmalldecoder/best.pt"         # ← 換成你的 .pt 路徑
 # csv_path  = "./data/test/test.csv"       # ← 換成要測的軌跡
 csv_path  = "./data/datasets/112_000066.csv"       # ← 換成要測的軌跡
+csv_path  = "./data/datasets/085_000094.csv"       # ← 換成要測的軌跡
+# csv_path  = "./data/datasets/085_000083.csv"       # ← 換成要測的軌跡
+# csv_path  = "./data/datasets/153_000052.csv"       # ← 換成要測的軌跡
 max_iter  = 200
 patience  = 10
 save_path = Path("./result/test")
 save_path.parent.mkdir(parents=True, exist_ok=True)         # <<< ADD: 建資料夾
 mask_history, keep_idx_history, loss_history = [], [], []   # <<< ADD: 歷史記錄
 scores_history = []                                         # <<< ADD:（可選）記錄 scores
-NMS = True  # 是否使用 NMS 後處理（True = 使用）
+NMS = False  # 是否使用 NMS 後處理（True = 使用）
 class _Args: pass
 args = _Args()
 args.ckpt     = ckpt_path
@@ -37,9 +40,9 @@ args.NMS = NMS
 # -------------------- 1. load cfg & model --------------------
 ckpt = torch.load(args.ckpt, map_location="cpu")
 cfg  = ckpt["cfg"]                    # 已存成 dict
-cfg['model']['bottleneck']['compression_ratio'] = 0.08  # 20% of input seq length
+cfg['model']['bottleneck']['compression_ratio'] = 0.2  # 20% of input seq length
 model = TrajSimplificationModel(cfg)
-# model.load_state_dict(ckpt["model"])
+model.load_state_dict(ckpt["model"])
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model.to(device)
 
@@ -146,7 +149,7 @@ for it in range(1, args.max_iter + 1):
     keep_idx_history.append(mask_history[-1].nonzero(as_tuple=False).squeeze(1))
     if "scores" in out:
         scores_history.append(out["scores"].detach().cpu())          
-    # print(f"iter {it:02d} | loss {loss.item():.4f} | kept {cur_mask.sum().item()} pts")
+    print(f"iter {it:02d} | loss {loss.item():.4f} | kept {cur_mask.sum().item()} pts")
 
     if no_imp >= args.patience:
         print(f"mask stable for {args.patience} rounds → stop")

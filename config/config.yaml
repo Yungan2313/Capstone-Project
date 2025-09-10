@@ -28,14 +28,26 @@ model:
   compressor:               # ⇐ Transformer Encoder
     layers     : 4
     heads      : 8
-    ffn_dim    : 256
+    ffn_dim    : 512
     dropout    : 0.1
 
   constructor:              # ⇐ Transformer Decoder
-    layers     : 4
+    layers     : 2          # make encoder be more powerful than decoder, to ensure encoder can choose right point well
     heads      : 8
-    ffn_dim    : 256
+    ffn_dim    : 128
     dropout    : 0.1
+
+  diff_topk:
+    enabled: true             # Enable soft top-k (used in training/validation)
+    method: proj_p2           # p=2 projection to capped simplex (stable, Σy=k)
+    k_mode: ratio             # Decide k by ratio
+    keep_ratio: 0.08          # Default follows bottleneck.compression_ratio
+    fixed_k: null             # Fill in an integer if you want fixed k
+    magnitude: false          # true = sort by |score| (choose value/magnitude)
+    pin_edges: true           # Always keep first & last (set their weight = 1)
+    hard_inference: false     # Only activate hardening in test+eval()
+    temperature: 0.5          # Only used if method=softmax_k; ignored for proj_p2
+
 
   bottleneck:
     compression_ratio: 0.3  # 0.3 = 30% of input sequence length
@@ -50,6 +62,6 @@ training:
   split_ratio : [0.7, 0.1, 0.2]   # train / val / test
   batch_size  : 16
   lr          : 1.0e-4
-  epochs      : 50
+  epochs      : 200
   num_workers : 0
   seed        : 42
