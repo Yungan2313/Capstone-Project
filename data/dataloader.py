@@ -87,3 +87,38 @@ class TrajDataModule:
                 self.test_ds, self.batch, shuffle=False, collate_fn=collate_fn, num_workers=self.num_workers
             ),
         )
+
+if __name__ == "__main__":
+    from pathlib import Path
+
+    save_dir = "./data"
+    data_dir = "./data/datasets"
+    out_dir = Path(save_dir) / "check"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    dm = TrajDataModule(
+        data_dir=data_dir,
+        split_ratio=(0.7, 0.2, 0.1),
+        max_len=200,
+        batch_size=32,
+        num_workers=0,
+        seed=42,
+    )
+
+    # 取出檔名（或想保留子資料夾層級就改成相對路徑）
+    def to_relative_names(paths):
+        base = Path(data_dir).resolve()
+        return [str(Path(p).resolve().relative_to(base)) for p in paths]
+
+    splits = {
+        "train": to_relative_names(dm.train_ds.files),
+        "val":   to_relative_names(dm.val_ds.files),
+        "test":  to_relative_names(dm.test_ds.files),
+    }
+
+    for name, names in splits.items():
+        (out_dir / f"{name}.txt").write_text("\n".join(names), encoding="utf-8")
+
+    total = sum(len(v) for v in splits.values())
+    print(f"[INFO] Saved lists to {out_dir} | total={total} "
+          f"(train={len(splits['train'])}, val={len(splits['val'])}, test={len(splits['test'])})")
