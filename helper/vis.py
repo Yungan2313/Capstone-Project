@@ -133,7 +133,7 @@ def graph_show(TIME_STAMP=False, annot_interval=1, use_map=True):
     # DIR = os.path.join(os.getcwd(), 'data/test')
     DIR = os.path.join(os.getcwd(), 'data/datasets')
     # df = pd.read_csv(os.path.join(DIR, 'test.csv'))
-    df = pd.read_csv(os.path.join(DIR, '010_000003.csv'))
+    df = pd.read_csv(os.path.join(DIR, '085_000094.csv'))
     
 
     # Create GeoDataFrame and project
@@ -200,12 +200,12 @@ def data_statistics():
 
 if __name__ == "__main__":
     # data_statistics()
-    # graph_show(TIME_STAMP = True, annot_interval=5, use_map=True)
+    graph_show(TIME_STAMP = True, annot_interval=5, use_map=True)
     # 隨機連看 5 張，檔名放在「標題」
-    graph_show_plus(select='random',
-                    DIR=os.path.join(os.getcwd(), 'data/datasets'),
-                    TIME_STAMP=False, annot_interval=5, use_map=False,
-                    repeat=10, show_filename='title')
+    # graph_show_plus(select='random',
+    #                 DIR=os.path.join(os.getcwd(), 'data/datasets'),
+    #                 TIME_STAMP=False, annot_interval=5, use_map=True,
+    #                 repeat=10, show_filename='title')
 
     # 指定清單，依序畫出各 1 張，檔名放在「標題」
     # graph_show_plus(select='specific',

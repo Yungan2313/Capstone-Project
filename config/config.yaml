@@ -65,3 +65,13 @@ training:
   epochs      : 200
   num_workers : 0
   seed        : 42
+# ----------------------------------------
+# 3.Modified Losses
+# ----------------------------------------
+losses:
+  bin_balance:
+    enabled: true        # Switch; when off, it fully reverts to the original behavior
+    weight: 0.1          # λ for this loss; recommended to try 0.05~0.2 first
+    bins: 16             # Number of segments; 10~32 are all reasonable
+    mode: "mse"        # "mse" or "under" (only penalize insufficiency)
+

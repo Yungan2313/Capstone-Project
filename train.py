@@ -85,6 +85,20 @@ def train_one_epoch(model, loader, optimizer, device, cfg):
             tau=(cfg["training"].get("softargmax_tau", 1.0) if isinstance(cfg, dict) and "training" in cfg else 1.0),
             eps=1e-6
         )
+        
+        bb_cfg = cfg.get("losses", {}).get("bin_balance", {})
+        if bb_cfg.get("enabled", False):
+            y_gate = out.get("soft_gate", None)  # 來自 model.forward
+            if y_gate is not None:               # 只有有軟 gate 時才加
+                bb_loss = bin_balance_loss(
+                    y_gate, pad_mask,
+                    bins=int(bb_cfg.get("bins", 16)),
+                    mode=bb_cfg.get("mode", "under"),
+                )
+                loss = loss + float(bb_cfg.get("weight", 0.1)) * bb_loss
+            # else: 沒有 y_gate（硬化或測試）就不加這項 loss
+
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -111,6 +125,48 @@ def evaluate(model, loader, device, cfg):
         ) 
         total_loss += loss.item() * gx.size(0)
     return total_loss / len(loader.dataset) 
+
+def bin_balance_loss(y, pad_mask, bins=16, mode="under"):
+    """
+    y:        [B, L]  可微 top-k 權重(0~1)；可能是 None（硬化路徑）
+    pad_mask: [B, L]  True=PAD, False=valid；也可能是 None
+    bins:     int     分段數
+    mode:     "mse" | "under"
+    """
+    # --- 防呆：若沒有 y（例如硬化或測試），直接回傳 0（在正確的 device 上） ---
+    device = None
+    if isinstance(pad_mask, torch.Tensor):
+        device = pad_mask.device
+    if y is None:
+        return torch.tensor(0.0, device=device)
+
+    B, L = y.shape
+    if device is None:
+        device = y.device
+
+    valid = (~pad_mask).float() if isinstance(pad_mask, torch.Tensor) else torch.ones(B, L, device=device)
+    y = y * valid  # 去掉 PAD 影響
+
+    # 每個 token 的 bin 索引（按時間等寬切 bins 份）
+    pos = torch.arange(L, device=device).unsqueeze(0).expand(B, L)
+    bin_idx = (pos * bins // L).clamp(max=bins - 1)  # [B, L]
+
+    # 計算各 bin 的 "質量"
+    bin_y = torch.zeros(B, bins, device=device)
+    bin_v = torch.zeros(B, bins, device=device)
+    bin_y.scatter_add_(1, bin_idx, y)        # Σ y_i in bin
+    bin_v.scatter_add_(1, bin_idx, valid)    # Σ valid_i in bin
+
+    # 轉成「比例」
+    eps = 1e-8
+    p_hat = bin_y / (bin_y.sum(dim=1, keepdim=True) + eps)  # 估計：y 的分佈
+    p_tgt = bin_v / (bin_v.sum(dim=1, keepdim=True) + eps)  # 目標：長度分佈
+
+    if mode == "mse":
+        loss = ((p_hat - p_tgt) ** 2).sum(dim=1).mean()
+    else:  # "under" 只懲罰不足的 bin
+        loss = (F.relu(p_tgt - p_hat)).sum(dim=1).mean()
+    return loss
 
 
 # -----------------------------------------------------------------------------
