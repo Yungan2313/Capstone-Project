@@ -257,6 +257,15 @@ def main():
     ts = time.strftime("%Y%m%d-%H%M")  # 例：20250911-1615
     session_dir = Path(args.out_root) / ts
     session_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_basename = Path(args.ckpt).name
+    ckpt_fullpath = Path(args.ckpt).resolve().as_posix()
+    try:
+        (session_dir / "eval_checkpoint.txt").write_text(
+            f"{ckpt_basename}\n{ckpt_fullpath}\n", encoding="utf-8"
+        )
+    except Exception as e:
+        print(f"[warn] cannot write eval_checkpoint.txt in {session_dir}: {e}")
+
 
     # 小工具：從格點還原 Lat/Lon（若無原始 df 可用）
     def grid_to_ll_np(gx_1d: np.ndarray, gy_1d: np.ndarray):
@@ -289,7 +298,9 @@ def main():
             name = sample_name_from_dataset(test_ds, global_index)
 
             # 輸出資料夾：為每條軌跡建子資料夾
-            out_dir = session_dir / name
+            # 以原始檔案名稱的 stem 當作樣本資料夾名稱（可直接對回 ./data/datasets/{stem}.csv）
+            stem = sample_name_from_dataset(test_ds, global_index)
+            out_dir = session_dir / stem
             out_dir.mkdir(parents=True, exist_ok=True)
 
             # histories（每條軌跡各自重置）
@@ -387,7 +398,7 @@ def main():
             kept_lons = lons[keep_idx]
 
             # CSV（最終）
-            out_csv = out_dir / f"{name}_kept.csv"
+            out_csv = out_dir / f"{stem}_kept.csv"
             pd.DataFrame({
                 "idx": keep_idx,
                 "lat": lats[keep_idx],
@@ -395,16 +406,16 @@ def main():
             }).to_csv(out_csv, index=False)
 
             # PNG（最終）
-            out_png = out_dir / f"{name}.png"
+            out_png = out_dir / f"{stem}.png"
             save_final_plot(lats, lons, lats[keep_idx], lons[keep_idx], out_png, title=name)
 
             # GIF / HTML（可選）
             if args.save_gif:
-                out_gif = out_dir / f"{name}_kept_anim.gif"
+                out_gif = out_dir / f"{stem}_kept_anim.gif"
                 save_kept_animation_gif(lats, lons, keep_hist, loss_hist, out_gif, title=name)
 
             if args.save_html:
-                out_html = out_dir / f"{name}_kept_anim.html"
+                out_html = out_dir / f"{stem}_kept_anim.html"
                 save_kept_animation_html(lats, lons, keep_hist, loss_hist, out_html, title=name)
 
 
@@ -415,6 +426,6 @@ def main():
 if __name__ == "__main__":
     """
     執行指令範例：
-    python evaluate.py --ckpt .\checkpoint\20250914-132629_v3_mse/best.pt --out_root .\result\eval --max_iter 200 --patience 10 --cratio 0.2 --save_gif --save_html
+    python evaluate.py --ckpt .\checkpoint\20250815-184727_v1.1/best.pt --out_root .\result\eval --max_iter 200 --patience 10 --cratio 0.2 --save_gif --save_html
     """
     main()

@@ -15,7 +15,14 @@ class TrajCSVDataset(Dataset):
     假設每檔案一條軌跡 csv 檔將單一 csv → (gx, gy, length) tensor
     """
     def __init__(self, files: List[Path], max_len: int, win):
+        # 原始檔路徑清單
         self.files = files
+        # 讓 evaluate.sample_name_from_dataset() 能直接抓到「原始檔名的 stem」
+        # evaluate 會依序檢查 dataset 的屬性: name / filename / file / path / id / metas
+        # 這裡同時提供 name / filename / path，避免找不到而退回 sample_00000…
+        self.name = [p.stem for p in files]           # 例如 "073_000028"
+        self.filename = [p.name for p in files]       # 例如 "073_000028.csv"
+        self.path = [str(p) for p in files]           # 完整路徑字串
         self.max_len = max_len
         self.win = win
 
