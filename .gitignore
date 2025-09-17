@@ -1,0 +1,4 @@
+*.csv
+*.npz
+tempCodeRunnerFile.py
+__pycache__/
