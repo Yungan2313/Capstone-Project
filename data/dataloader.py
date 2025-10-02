@@ -35,9 +35,19 @@ class TrajCSVDataset(Dataset):
             df["lon"].values,
             win=self.win
         )
+        # 取得 time → 轉成「從起點開始的秒」
+        if "time" in df.columns:
+            tt = pd.to_datetime(df["time"], errors="ignore")
+            if np.issubdtype(tt.dtype, np.datetime64):
+                t_sec = (tt - tt.iloc[0]).dt.total_seconds().to_numpy(dtype=float)
+            else:
+                t_num = pd.to_numeric(df["time"], errors="coerce").to_numpy(dtype=float)
+                t_sec = t_num - np.nanmin(t_num)
+        else:
+            t_sec = np.arange(len(df), dtype=float)
         if len(gx) > self.max_len:        # truncate，但 **不 pad**
-            gx, gy = gx[: self.max_len], gy[: self.max_len]
-        return torch.LongTensor(gx), torch.LongTensor(gy), len(gx)
+            gx, gy, t_sec = gx[: self.max_len], gy[: self.max_len], t_sec[: self.max_len]
+        return torch.LongTensor(gx), torch.LongTensor(gy), torch.tensor(t_sec, dtype=torch.float32), len(gx)
 
 
 class TrajDataModule:
@@ -105,7 +115,7 @@ if __name__ == "__main__":
 
     dm = TrajDataModule(
         data_dir=data_dir,
-        split_ratio=(0.7, 0.2, 0.1),
+        split_ratio=(0.7, 0.1, 0.2),
         max_len=200,
         batch_size=32,
         num_workers=0,

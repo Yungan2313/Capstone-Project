@@ -277,7 +277,7 @@ def main():
     global_index = 0
     pbar = tqdm(test_loader, desc="evaluate", leave=True)
     for batch in pbar:
-        gx, gy, pad_mask = batch  # 形狀：[B, L]
+        gx, gy, t, pad_mask = batch  # 形狀：[B, L]
         gx = gx.to(device)
         gy = gy.to(device)
         pad_mask = pad_mask.to(device)
@@ -311,24 +311,57 @@ def main():
             best_loss = float("inf")
             no_imp = 0
             start = time.time()
-
+            
+            # --- 讀原始 CSV 的時間欄位，轉成秒數 t_sec_np，再做成 t_b (tensor[1,L]) ---
+            src_csv = None
+            if hasattr(test_ds, "files"):
+                src_csv = test_ds.files[global_index]
+            if src_csv is not None:
+                df_src = pd.read_csv(src_csv)
+                if any(c in df_src.columns for c in ["time", "timestamp", "seconds"]):
+                    t_col = "time" if "time" in df_src.columns else ("timestamp" if "timestamp" in df_src.columns else "seconds")
+                    t_series = pd.to_datetime(df_src[t_col], errors="ignore")
+                    if np.issubdtype(t_series.dtype, np.datetime64):
+                        t_sec_np = (t_series - t_series.iloc[0]).dt.total_seconds().to_numpy(dtype=float)
+                    else:
+                        t_sec_np = pd.to_numeric(df_src[t_col], errors="coerce").to_numpy(dtype=float)
+                        t_sec_np = t_sec_np - np.nanmin(t_sec_np)
+                else:
+                    t_sec_np = np.arange(gx_b.size(1), dtype=float)
+            else:
+                t_sec_np = np.arange(gx_b.size(1), dtype=float)
+            t_b = torch.tensor(t_sec_np, dtype=torch.float32, device=gx_b.device).unsqueeze(0)
+            
             # 迭代微調（與你先前單軌跡 test 一致）
             for it in range(1, args.max_iter + 1):
                 out = model(gx_b, gy_b, pad_b)
 
                 # 你新版 loss：SED（與 evaluate/test 的寫法一致）
-                from train import sed_from_two_logits, _make_axis_centers
+                from train import sed_from_two_logits, _make_axis_centers, _softargmax_xy, _sed_time_sync_loss
                 Cx = out["logits_x"].size(-1)
                 Cy = out["logits_y"].size(-1)
                 x_centers = _make_axis_centers(Cx, device=out["logits_x"].device)
                 y_centers = _make_axis_centers(Cy, device=out["logits_y"].device)
-                loss = sed_from_two_logits(
+                base = sed_from_two_logits(
                     out["logits_x"], out["logits_y"],
                     gx_b, gy_b, pad_b,
                     x_centers, y_centers,
                     tau=(cfg["training"].get("softargmax_tau", 1.0)
                          if isinstance(cfg, dict) and "training" in cfg else 1.0),
                     eps=1e-6
+                )
+                tau = float(cfg.get("training", {}).get("softargmax_tau", 1.0))
+                pred_x, pred_y = _softargmax_xy(out["logits_x"], out["logits_y"], x_centers, y_centers, tau=tau)
+                loss = _sed_time_sync_loss(
+                    pred_x, pred_y, t_b,
+                    out["mask"].bool() if "mask" in out else (out["scores"] > 0),
+                    pad_b
+                ) + base
+                
+                loss = _sed_time_sync_loss(
+                    pred_x, pred_y, t_b,
+                    out["mask"].bool() if "mask" in out else (out["scores"] > 0),
+                    pad_b
                 )
                 
                 # ----- Modified Losses -----
@@ -337,7 +370,7 @@ def main():
                     y_gate = out.get("soft_gate", None)  # 來自 model.forward
                     if y_gate is not None:               # 只有有軟 gate 時才加
                         bb_loss = bin_balance_loss(
-                            y_gate, pad_mask,
+                            y_gate, pad_b,
                             bins=int(bb_cfg.get("bins", 16)),
                             mode=bb_cfg.get("mode", "under"),
                         )
@@ -380,10 +413,8 @@ def main():
             keep_idx = best_mask.squeeze(0).nonzero(as_tuple=False).squeeze(1).cpu().numpy()  # [K]
 
             # 直接讀原始 CSV（與 test.py 一致，避免反推誤差）
-            src_csv = None
-            # 你的 TrajCSVDataset 有 files list（常見設計），直接拿來用：
-            if hasattr(test_ds, "files"):
-                src_csv = test_ds.files[global_index]
+            # src_csv 已在上方取得；lats/lons 仍從原始 df 取用
+            
             if src_csv is None:
                 # 萬一取不到，最後才 fallback（不建議）
                 gx_np = gx_b.squeeze(0).detach().cpu().numpy()
@@ -399,10 +430,17 @@ def main():
 
             # CSV（最終）
             out_csv = out_dir / f"{stem}_kept.csv"
+            # pd.DataFrame({
+            #     "idx": keep_idx,
+            #     "lat": lats[keep_idx],
+            #     "lon": lons[keep_idx],
+            # }).to_csv(out_csv, index=False)
+            
             pd.DataFrame({
                 "idx": keep_idx,
                 "lat": lats[keep_idx],
                 "lon": lons[keep_idx],
+                "time": t_sec_np[keep_idx],
             }).to_csv(out_csv, index=False)
 
             # PNG（最終）
@@ -426,6 +464,6 @@ def main():
 if __name__ == "__main__":
     """
     執行指令範例：
-    python evaluate.py --ckpt .\checkpoint\20250815-184727_v1.1/best.pt --out_root .\result\eval --max_iter 200 --patience 10 --cratio 0.2 --save_gif --save_html
+    python evaluate.py --ckpt .\checkpoint\20250910-184624_v2withsmalldecoder\best.pt --out_root .\result\eval --max_iter 200 --patience 10 --cratio 0.2 --save_gif --save_html
     """
     main()

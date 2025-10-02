@@ -19,12 +19,12 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # parser.add_argument("--max_iter", type=int, default=30, help="fine-tune rounds")
 # parser.add_argument("--patience", type=int, default=5, help="stop if mask unchanged for N rounds")
 # args = parser.parse_args()
-ckpt_path = "./checkpoint/20250914-132629_v3_mse/best.pt"         # ← 換成你的 .pt 路徑
-# csv_path  = "./data/test/test.csv"       # ← 換成要測的軌跡
+ckpt_path = "./checkpoint/20250918-181249_v3.1/best.pt"         # ← 換成你的 .pt 路徑
+csv_path  = "./data/test/test.csv"       # ← 換成要測的軌跡
 csv_path  = "./data/datasets/112_000066.csv"       # ← 換成要測的軌跡
-csv_path  = "./data/datasets/085_000094.csv"       # ← 換成要測的軌跡
-csv_path  = "./data/datasets/085_000083.csv"       # ← 換成要測的軌跡
-csv_path  = "./data/datasets/153_000052.csv"       # ← 換成要測的軌跡
+# csv_path  = "./data/datasets/085_000094.csv"       # ← 換成要測的軌跡
+# csv_path  = "./data/datasets/085_000083.csv"       # ← 換成要測的軌跡
+# csv_path  = "./data/datasets/153_000052.csv"       # ← 換成要測的軌跡
 max_iter  = 200
 patience  = 10
 save_path = Path("./result/test")
@@ -55,7 +55,17 @@ gx, gy = latlon_to_grid(df["lat"].values, df["lon"].values,
 gx = torch.LongTensor(gx).unsqueeze(0).to(device)    # [1,L]
 gy = torch.LongTensor(gy).unsqueeze(0).to(device)
 pad_mask = gx.eq(cfg["data"]["pad_idx"])             # [1,L]
-
+if "seconds" in df.columns or "timestamp" in df.columns:
+    # 嘗試把第 3 欄時間轉 datetime；失敗就當數值處理
+    t_series = pd.to_datetime(df.iloc[:, 2], errors="ignore")
+    if np.issubdtype(t_series.dtype, np.datetime64):
+        t_sec_np = (t_series - t_series.iloc[0]).dt.total_seconds().to_numpy(dtype=float)
+    else:
+        t_sec_np = pd.to_numeric(df.iloc[:, 2], errors="coerce").to_numpy(dtype=float)
+        t_sec_np = t_sec_np - np.nanmin(t_sec_np)
+else:
+    t_sec_np = np.arange(len(df), dtype=float)
+t_b = torch.tensor(t_sec_np, dtype=torch.float32, device=gx.device).unsqueeze(0)  # [1,L]
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
 # -------------------- 3. iterative fine-tune --------------------
@@ -144,18 +154,31 @@ for it in range(1, args.max_iter + 1):
     # loss_x = masked_ce(out["logits_x"], gx, pad_mask)
     # loss_y = masked_ce(out["logits_y"], gy, pad_mask)
     # loss   = loss_x + loss_y
-    from train import sed_from_two_logits, _make_axis_centers
+    from train import sed_from_two_logits, _make_axis_centers, _softargmax_xy, _sed_time_sync_loss
     Cx = out["logits_x"].size(-1)
     Cy = out["logits_y"].size(-1)
     x_centers = _make_axis_centers(Cx, device=out["logits_x"].device)
     y_centers = _make_axis_centers(Cy, device=out["logits_y"].device)
-    loss = sed_from_two_logits(
+    base = sed_from_two_logits(
         out["logits_x"], out["logits_y"],
         gx, gy, pad_mask,
         x_centers, y_centers,
         tau=(cfg["training"].get("softargmax_tau", 1.0) if isinstance(cfg, dict) and "training" in cfg else 1.0),
         eps=1e-6
     )
+    tau = (cfg["training"].get("softargmax_tau", 1.0) if isinstance(cfg, dict) and "training" in cfg else 1.0)
+    pred_x, pred_y = _softargmax_xy(out["logits_x"], out["logits_y"], x_centers, y_centers, tau=tau)
+    
+    loss = _sed_time_sync_loss(
+        pred_x, pred_y, t_b,
+        out["mask"].bool() if "mask" in out else (out["scores"] > 0),
+        pad_mask
+    ) + base
+    # loss = _sed_time_sync_loss(
+    #     pred_x, pred_y, t_b,
+    #     out["mask"].bool() if "mask" in out else (out["scores"] > 0),
+    #     pad_mask
+    # )
 
     # ----- Modified Losses -----
     bb_cfg = cfg.get("losses", {}).get("bin_balance", {})
@@ -323,11 +346,18 @@ def save_per_iter_csvs(df, keep_idx_hist, base_path: Path):
     base = base_path.with_suffix("")  # ./result/test  → ./result/test
     for i, idx in enumerate(keep_idx_hist, start=1):
         idx_np = idx.cpu().numpy()
+        # out_df_i = pd.DataFrame({
+        #     "idx": idx_np,
+        #     "lat": df["lat"].iloc[idx_np].values,
+        #     "lon": df["lon"].iloc[idx_np].values
+        # })
         out_df_i = pd.DataFrame({
             "idx": idx_np,
             "lat": df["lat"].iloc[idx_np].values,
-            "lon": df["lon"].iloc[idx_np].values
+            "lon": df["lon"].iloc[idx_np].values,
+            "time": t_sec_np[idx_np]
         })
+        
         csv_i = base.with_name(base.name + f"_iter_{i:02d}_kept.csv")
         out_df_i.to_csv(csv_i, index=False)
 save_kept_animation_html(df, keep_idx_history, loss_history, save_path, Path(args.csv).stem)
@@ -336,11 +366,10 @@ save_per_iter_csvs(df, keep_idx_history, save_path)
 # -------------------- 4. 輸出保留點 --------------------
 keep_idx = best_mask.squeeze(0).nonzero(as_tuple=False).squeeze(1).cpu()  # 1-D indices
 lat_kept, lon_kept = df["lat"].iloc[keep_idx], df["lon"].iloc[keep_idx]
-out_df = pd.DataFrame({
-    "idx": keep_idx.numpy(),
-    "lat": lat_kept.values,
-    "lon": lon_kept.values
-})
+out_df = pd.DataFrame({"idx": keep_idx.numpy(),
+                       "lat": lat_kept.values,
+                       "lon": lon_kept.values,
+                       "time": t_sec_np[keep_idx.numpy()]})
 final_save_path = Path(save_path).with_suffix("")  # 變成沒有 .csv
 final_save_path = final_save_path.with_name(final_save_path.name + "_kept.csv")
 out_df.to_csv(final_save_path, index=False)

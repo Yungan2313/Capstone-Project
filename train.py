@@ -24,7 +24,44 @@ from helper.graph import draw_loss
 def _make_axis_centers(n: int, device):
     # 以格子中心為座標：0.5, 1.5, 2.5, ... (單位：格子)
     return (torch.arange(n, device=device, dtype=torch.float32) + 0.5)
+def _softargmax_xy(logits_x, logits_y, x_centers, y_centers, tau: float = 1.0):
+    px = F.softmax(logits_x / tau, dim=-1)  # [B,L,Cx]
+    py = F.softmax(logits_y / tau, dim=-1)  # [B,L,Cy]
+    pred_x = torch.matmul(px, x_centers)    # [B,L]
+    pred_y = torch.matmul(py, y_centers)    # [B,L]
+    return pred_x, pred_y
 
+def _sed_time_sync_loss(pred_x, pred_y, t, mask_bool, pad_mask, eps: float = 1e-6):
+    """
+    以『保留點（mask=True）』作為折線骨架，對每段 s→e 以 t 線性內插求出對應點，
+    再計算中間點到該線段的 L2 距離；對 pred_x/pred_y 可微。
+    """
+    B, L = pred_x.shape
+    valid = ~pad_mask if pad_mask is not None else torch.ones_like(pred_x, dtype=torch.bool)
+    total = pred_x.new_zeros(())
+    for b in range(B):
+        kept = mask_bool[b].nonzero(as_tuple=False).squeeze(1)
+        if kept.numel() < 2:
+            continue
+        v = valid[b]
+        for i in range(kept.numel() - 1):
+            s = int(kept[i]); e = int(kept[i+1])
+            if e <= s:
+                continue
+            idx = torch.arange(s, e + 1, device=pred_x.device)
+            idx = idx[v[idx]]
+            if idx.numel() == 0:
+                continue
+            t_s, t_e = t[b, s], t[b, e]
+            denom = (t_e - t_s).clamp_min(1e-6)
+            a = ((t[b, idx] - t_s) / denom).clamp(0.0, 1.0)  # <<<< 注意逗號
+            sx = pred_x[b, s] + a * (pred_x[b, e] - pred_x[b, s])
+            sy = pred_y[b, s] + a * (pred_y[b, e] - pred_y[b, s])
+            dx = pred_x[b, idx] - sx
+            dy = pred_y[b, idx] - sy
+            total = total + torch.sqrt(dx * dx + dy * dy + eps * eps).sum()
+    denom = valid.float().sum().clamp_min(1.0)
+    return total / denom
 def sed_from_two_logits(
     logits_x, logits_y,            # [B,L,Cx], [B,L,Cy]
     gx, gy,                         # [B,L],    [B,L]  (int)
@@ -71,60 +108,70 @@ def masked_ce(logits, target, pad_mask):
 def train_one_epoch(model, loader, optimizer, device, cfg):
     model.train()
     total_loss = 0.0
-    for gx, gy, pad_mask in tqdm(loader, desc="train", leave=True):
-        gx, gy, pad_mask = gx.to(device), gy.to(device), pad_mask.to(device)
+    tau = float(cfg.get("training", {}).get("softargmax_tau", 1.0))
+    for gx, gy, t, pad_mask in tqdm(loader, desc="train", leave=True):
+        gx, gy, t, pad_mask = gx.to(device), gy.to(device), t.to(device), pad_mask.to(device)
         out: Dict[str, torch.Tensor] = model(gx, gy, pad_mask)  # <-- forward
         Cx = out["logits_x"].size(-1)
         Cy = out["logits_y"].size(-1)
         x_centers = _make_axis_centers(Cx, device=out["logits_x"].device)
         y_centers = _make_axis_centers(Cy, device=out["logits_y"].device)
-        loss = sed_from_two_logits(
+        base = sed_from_two_logits(
             out["logits_x"], out["logits_y"],
             gx, gy, pad_mask,
             x_centers, y_centers,
             tau=(cfg["training"].get("softargmax_tau", 1.0) if isinstance(cfg, dict) and "training" in cfg else 1.0),
             eps=1e-6
         )
+        # x_centers = _make_axis_centers(Cx, device=out["logits_x"].device)
+        # y_centers = _make_axis_centers(Cy, device=out["logits_y"].device)
+        x_centers = (torch.arange(Cx, device=out["logits_x"].device, dtype=torch.float32) + 0.5)
+        y_centers = (torch.arange(Cy, device=out["logits_y"].device, dtype=torch.float32) + 0.5)
+        pred_x, pred_y = _softargmax_xy(out["logits_x"], out["logits_y"], x_centers, y_centers, tau=tau)
         
+        # 只用『時間同步 SED』作為主要 loss
+        mask_bool = out["mask"].bool()  # 模型給的保留點（可配合 top-k/NMS）
+        loss = _sed_time_sync_loss(pred_x, pred_y, t, mask_bool, pad_mask) + base
+        # loss = _sed_time_sync_loss(pred_x, pred_y, t, mask_bool, pad_mask)
+
+        # 保留 bin_balance
         bb_cfg = cfg.get("losses", {}).get("bin_balance", {})
         if bb_cfg.get("enabled", False):
-            y_gate = out.get("soft_gate", None)  # 來自 model.forward
-            if y_gate is not None:               # 只有有軟 gate 時才加
+            y_gate = out.get("soft_gate", None)  # 有軟 gate 才加
+            if y_gate is not None:
                 bb_loss = bin_balance_loss(
                     y_gate, pad_mask,
                     bins=int(bb_cfg.get("bins", 16)),
                     mode=bb_cfg.get("mode", "under"),
                 )
                 loss = loss + float(bb_cfg.get("weight", 0.1)) * bb_loss
-            # else: 沒有 y_gate（硬化或測試）就不加這項 loss
-
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * gx.size(0)
+
     return total_loss / len(loader.dataset)
 
 @torch.no_grad()
 def evaluate(model, loader, device, cfg):
     model.eval()
     total_loss = 0.0
-    for gx, gy, pad_mask in tqdm(loader, desc="valid", leave=False):
-        gx, gy, pad_mask = gx.to(device), gy.to(device), pad_mask.to(device)
+    tau = float(cfg.get("training", {}).get("softargmax_tau", 1.0))
+    for gx, gy, t, pad_mask in tqdm(loader, desc="valid", leave=False):  # <<<< 多了 t
+        gx, gy, t, pad_mask = gx.to(device), gy.to(device), t.to(device), pad_mask.to(device)
         out: Dict[str, torch.Tensor] = model(gx, gy, pad_mask)  # <-- forward
         Cx = out["logits_x"].size(-1)
         Cy = out["logits_y"].size(-1)
-        x_centers = _make_axis_centers(Cx, device=out["logits_x"].device)
-        y_centers = _make_axis_centers(Cy, device=out["logits_y"].device)
-        loss = sed_from_two_logits(
-            out["logits_x"], out["logits_y"],
-            gx, gy, pad_mask,
-            x_centers, y_centers,
-            tau=getattr(cfg["training"], "softargmax_tau", 1.0) if isinstance(cfg, dict) and "training" in cfg else 1.0,
-            eps=1e-6
-        ) 
+        x_centers = (torch.arange(Cx, device=out["logits_x"].device, dtype=torch.float32) + 0.5)
+        y_centers = (torch.arange(Cy, device=out["logits_y"].device, dtype=torch.float32) + 0.5)
+        pred_x, pred_y = _softargmax_xy(out["logits_x"], out["logits_y"], x_centers, y_centers, tau=tau)
+
+        mask_bool = out["mask"].bool()
+        loss = _sed_time_sync_loss(pred_x, pred_y, t, mask_bool, pad_mask)
         total_loss += loss.item() * gx.size(0)
-    return total_loss / len(loader.dataset) 
+
+    return total_loss / len(loader.dataset)
 
 def bin_balance_loss(y, pad_mask, bins=16, mode="under"):
     """
