@@ -1,0 +1,77 @@
+# ----------------------------------------
+# 1.Data
+# ----------------------------------------
+data:
+  # grid definite
+  cell_size   : 0.001      # about 
+  min_lat     : 39.847733   # save for calculating w (calulate from grid_stats.py)
+  min_lon     : 115.6791
+  fixed_window: 18         # w (calulate from scan_w.py)
+  num_cells_x : 37         # lon grid count = pad_idx + 1
+  num_cells_y : 37         # lat grid count = pad_idx + 1
+  pad_idx     : 36         # 2*w+1
+
+  # 檔案路徑
+  dataset_dir : data/datasets   # csv files directory
+  skip_list   : data/notBeijing.txt #files to skip
+
+# ----------------------------------------
+# 2.Model
+# ----------------------------------------
+model:
+  embedding:
+    dim        : 64         # (= D)
+    mode       : concat     # concat | sum
+    dropout    : 0.1
+    layernorm  : true
+
+  compressor:               # ⇐ Transformer Encoder
+    layers     : 4
+    heads      : 8
+    ffn_dim    : 512
+    dropout    : 0.1
+
+  constructor:              # ⇐ Transformer Decoder
+    layers     : 2          # make encoder be more powerful than decoder, to ensure encoder can choose right point well
+    heads      : 8
+    ffn_dim    : 128
+    dropout    : 0.1
+
+  diff_topk:
+    enabled: false             # Enable soft top-k (used in training/validation)
+    method: proj_p2           # p=2 projection to capped simplex (stable, Σy=k)
+    k_mode: ratio             # Decide k by ratio
+    keep_ratio: 0.08          # Default follows bottleneck.compression_ratio
+    fixed_k: null             # Fill in an integer if you want fixed k
+    magnitude: false          # true = sort by |score| (choose value/magnitude)
+    pin_edges: true           # Always keep first & last (set their weight = 1)
+    hard_inference: false     # Only activate hardening in test+eval()
+    temperature: 0.5          # Only used if method=softmax_k; ignored for proj_p2
+
+
+  bottleneck:
+    compression_ratio: 0.3  # 0.3 = 30% of input sequence length
+  loss: mse                 # mse | l1
+  max_seq_len: 2048
+  local_window: 18          # constructor used (w)
+
+# ----------------------------------------
+# 3.Training
+# ----------------------------------------
+training:
+  split_ratio : [0.7, 0.1, 0.2]   # train / val / test
+  batch_size  : 16
+  lr          : 1.0e-4
+  epochs      : 200
+  num_workers : 0
+  seed        : 42
+# ----------------------------------------
+# 3.Modified Losses
+# ----------------------------------------
+losses:
+  bin_balance:
+    enabled: false        # Switch; when off, it fully reverts to the original behavior
+    weight: 0.1          # λ for this loss; recommended to try 0.05~0.2 first
+    bins: 16             # Number of segments; 10~32 are all reasonable
+    mode: "mse"        # "mse" or "under" (only penalize insufficiency)
+
