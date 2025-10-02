@@ -2,7 +2,6 @@
 
 本專案實作並研究 **自回歸式軌跡簡化模型 (Autoregressive Trajectory Simplification Model)**，基於 Transformer 架構，利用 Encoder-Decoder 機制自動選取並保留關鍵軌跡點，達成資料壓縮的同時保留軌跡結構特徵。
 
-📄 論文報告：[研究成果報告 PDF](./專題研究成果報告.pdf)  
 📂 GitHub Repo: [Capstone-Project](https://github.com/Yungan2313/Capstone-Project)
 
 ---
