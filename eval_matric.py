@@ -9,7 +9,10 @@ Outputs:
 - Per-sample:  session_dir/{stem}/errors.txt
 - Session avg: session_dir/eval_summary.txt
 python eval_matric.py --session_dir ./result/eval/2025xxxx-xxxx --datasets_dir ./data/datasets
-python -m eval_matric --session_dir ./result/eval/20250916-2346 --datasets_dir ./data/datasets
+python -m eval_matric --session_dir ./result/eval/20250923-1029 --datasets_dir ./data/datasets
+python -m eval_matric --session_dir ./result/eval/20250921-192525_DP --datasets_dir ./data/datasets
+python -m eval_matric --session_dir ./result/eval/20250921-192525_Error-Search --datasets_dir ./data/datasets
+python -m eval_matric --session_dir ./result/eval/20250921-192525_TDTR --datasets_dir ./data/datasets
 """
 import argparse, os, math, json
 from pathlib import Path

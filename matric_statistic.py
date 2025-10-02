@@ -31,8 +31,11 @@ python compare_models_ped_sed.py \
   --pick-by wavg --w-sed 1.0 --w-ped 0.5
 
 The script also writes a 'compare_summary.txt' next to the CSV with overall stats per model.
-python -m matric_statsic --out ./result/compare.csv --model v1=./result/eval/20250917-0052 --model v3=./result/eval/20250916-2346_v3 --model v3nov2=./result/eval/20250917-1606 --pick-by sed
-
+python -m matric_statsic --out ./result/compare.csv --model v1=./result/eval/20250917-0052 --model v2=./result/eval/20250926-1152 --model v3=./result/eval/20250916-2346_v3 --model v3nov2=./result/eval/20250917-1606 --model v3.1nov2=./result/eval/20250919-1046 --model v3.1withv2=./result/eval/20250923-1029 --model v3.1withoutv2+base=./result/eval/20250924-0119 --model v3.1withv2+base=./result/eval/20250924-0957 --model v3.1withoutv2v3=./result/eval/20250925-1614 --model v3.1withoutv2v3+evalbase=./result/eval/20250925-1028 --model v3.1withoutv2v3+base_withoutevalbase=./result/eval/20250925-1614 --model v3.1withoutv2v3+base=./result/eval/20250926-0003 --pick-by sed
+python -m matric_statsic --out ./result/compare.csv --model v1=./result/eval/20250917-0052 --model v2=./result/eval/20250926-1152 --model v3nov2=./result/eval/20250917-1606 --model v3.1withoutv2v3+base=./result/eval/20250926-0003 --pick-by sed
+python -m matric_statsic --out ./result/compare.csv --model v1=./result/eval/20250917-0052 --model v2=./result/eval/20250926-1152 --model v3=./result/eval/20250916-2346_v3 --model v3nov2=./result/eval/20250917-1606 --model v3.1withoutv2v3+base=./result/eval/20250926-0003 --model v3.1withv2+base=./result/eval/20250924-0957 --model v3.1withoutv2+base=./result/eval/20250924-0119 --model v3.1withoutv2v3=./result/eval/20250925-1614 --pick-by sed
+python -m matric_statsic --out ./result/compare.csv --model v3.1withoutv2v3=./result/eval/20250925-1614 --model v3.1withoutv2v3+evalbase=./result/eval/20250925-1028 --model v3.1withoutv2v3+base_withoutevalbase=./result/eval/20250925-1614 --model v3.1withoutv2v3+base=./result/eval/20250926-0003 --pick-by sed
+python -m matric_statsic --out ./result/compare.csv --model v1=./result/eval/20250917-0052 --model v2=./result/eval/20250926-1152 --model v3=./result/eval/20250916-2346_v3 --model v3nov2=./result/eval/20250917-1606 --model v3.1withoutv2v3+base=./result/eval/20250926-0003 --model v3.1withv2+base=./result/eval/20250924-0957 --model v3.1withoutv2+base=./result/eval/20250924-0119 --model v3.1withoutv2v3=./result/eval/20250925-1614  --model v3.1withoutv2v3+evalbase=./result/eval/20250925-1028 --model v3.1withoutv2v3+base_withoutevalbase=./result/eval/20250925-1614 --model v3.1withoutv2v3+base=./result/eval/20250926-0003 --pick-by sed
 """
 import argparse, re, math
 from pathlib import Path
@@ -133,7 +136,7 @@ def build_table(model_sessions, pick_by="sed", w_sed=1.0, w_ped=1.0):
     total_present = len(df)
     for name in data_by_model.keys():
         wins = win_counts.get(name, 0)
-        lines.append(f"{name}: wins={wins}/{total_present}")
+        lines.append(f"{name:<30} wins={wins:>3}/{total_present}")
     lines.append("")
 
     # overall means per model (across samples where the model has values)
@@ -142,7 +145,9 @@ def build_table(model_sessions, pick_by="sed", w_sed=1.0, w_ped=1.0):
         sed_vals = [v["SED_mean"] for v in data.values() if "SED_mean" in v]
         ped_mean = float(np.mean(ped_vals)) if ped_vals else float("nan")
         sed_mean = float(np.mean(sed_vals)) if sed_vals else float("nan")
-        lines.append(f"{name}: overall PED_mean={ped_mean:.6f}, SED_mean={sed_mean:.6f}")
+        lines.append(
+            f"{name:<40} PED_mean={ped_mean:>12.6f}   SED_mean={sed_mean:>12.6f}"
+        )
 
     summary_txt = "\n".join(lines)
     return df, summary_txt

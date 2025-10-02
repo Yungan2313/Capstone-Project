@@ -133,7 +133,7 @@ def graph_show(TIME_STAMP=False, annot_interval=1, use_map=True):
     # DIR = os.path.join(os.getcwd(), 'data/test')
     DIR = os.path.join(os.getcwd(), 'data/datasets')
     # df = pd.read_csv(os.path.join(DIR, 'test.csv'))
-    df = pd.read_csv(os.path.join(DIR, '085_000094.csv'))
+    df = pd.read_csv(os.path.join(DIR, '179_000019.csv'))
     
 
     # Create GeoDataFrame and project
