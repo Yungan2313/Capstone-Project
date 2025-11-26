@@ -1,0 +1,1 @@
+python -m matric_statsic --out ./result/compare.csv --model v1=./result/eval/20250917-0052 --model v3.1withoutv2v3+evalbase=./result/eval/20250925-1028

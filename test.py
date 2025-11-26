@@ -19,9 +19,9 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # parser.add_argument("--max_iter", type=int, default=30, help="fine-tune rounds")
 # parser.add_argument("--patience", type=int, default=5, help="stop if mask unchanged for N rounds")
 # args = parser.parse_args()
-ckpt_path = "./checkpoint/20250918-181249_v3.1/best.pt"         # ← 換成你的 .pt 路徑
+ckpt_path = "./checkpoint/20250924-211027_v3.1_mse_withoutv2v3/best.pt"         # ← 換成你的 .pt 路徑
 csv_path  = "./data/test/test.csv"       # ← 換成要測的軌跡
-csv_path  = "./data/datasets/112_000066.csv"       # ← 換成要測的軌跡
+csv_path  = "./data/datasets/167_000008.csv"       # ← 換成要測的軌跡
 # csv_path  = "./data/datasets/085_000094.csv"       # ← 換成要測的軌跡
 # csv_path  = "./data/datasets/085_000083.csv"       # ← 換成要測的軌跡
 # csv_path  = "./data/datasets/153_000052.csv"       # ← 換成要測的軌跡
