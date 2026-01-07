@@ -23,15 +23,15 @@
 請先安裝必要套件(requirements.txt)
 
 Capstone-Project/
-│── config/                # 模型與實驗參數設定 (YAML)
-│── data/                  # 資料集處理 (Geolife步行資料)
-│── model/                 # 模型架構 (Transformer, Embedding, Compressor/Decoder)
-│── helper/                # 公用工具 (grid utils, metrics)
-│── checkpoints/           # 訓練權重儲存
-│── train.py               # 訓練入口
-│── test.py                # 單一資料測試入口
-│── evaluate.py            # 測試資料集測試入口
-│── evaluate.py            # 測試/評估入口
+- │── config/                # 模型與實驗參數設定 (YAML)
+- │── data/                  # 資料集處理 (Geolife步行資料)
+- │── model/                 # 模型架構 (Transformer, Embedding, Compressor/Decoder)
+- │── helper/                # 公用工具 (grid utils, metrics)
+- │── checkpoints/           # 訓練權重儲存
+- │── train.py               # 訓練入口
+- │── test.py                # 單一資料測試入口
+- │── evaluate.py            # 測試資料集測試入口
+- │── evaluate.py            # 測試/評估入口
 
 ## 🚀 使用方式
 1. 訓練模型
